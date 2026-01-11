@@ -396,11 +396,16 @@ function updateCamera() {
 
 // --- UI HANDLERS ---
 
-document.getElementById('start-btn').onclick = () => {
-    document.getElementById('main-menu').style.display = 'none';
-    document.getElementById('game-ui').style.display = 'block';
-    initGame();
-};
+// Stage Selection
+document.querySelectorAll('.stage-btn').forEach(btn => {
+    btn.onclick = () => {
+        const level = parseInt(btn.getAttribute('data-level'));
+        currentLevelIdx = level;
+        document.getElementById('main-menu').style.display = 'none';
+        document.getElementById('game-ui').style.display = 'block';
+        initGame();
+    };
+});
 
 document.getElementById('back-to-menu-btn').onclick = () => {
     resetGame();

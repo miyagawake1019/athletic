@@ -17,39 +17,49 @@
             Level: <span id="level-display">1</span> |
             Squad: <span id="squad-display">0/7</span>
         </div>
-        <button id="back-to-menu-btn" class="corner-btn">Menu</button>
+        <button id="back-to-menu-btn" class="corner-btn">戻る</button>
     </div>
 
     <!-- Main Menu -->
     <div id="main-menu">
         <h1>Athletic Quest</h1>
-        <button id="start-btn" class="menu-btn">Start Game</button>
-        <button id="party-btn" class="menu-btn">Party Setup</button>
-        <button id="gacha-btn" class="menu-btn">Gacha (Get Characters)</button>
+
+        <div id="stage-selection-container">
+            <h3>ステージ選択</h3>
+            <div class="stage-buttons">
+                <button class="stage-btn" data-level="0">1</button>
+                <button class="stage-btn" data-level="1">2</button>
+                <button class="stage-btn" data-level="2">3</button>
+            </div>
+        </div>
+
+        <button id="start-btn" class="menu-btn" style="display:none;">Start Game</button> <!-- Hidden, replaced by stage select -->
+        <button id="party-btn" class="menu-btn">パーティ編成</button>
+        <button id="gacha-btn" class="menu-btn">ガチャ (キャラゲット)</button>
     </div>
 
     <!-- Party Selection Screen -->
     <div id="party-screen" class="overlay" style="display: none;">
-        <h2>Party Setup (Max 7)</h2>
+        <h2>パーティ編成 (最大7体)</h2>
         <div class="party-container">
             <div id="owned-list" class="char-list">
-                <h3>Owned Characters</h3>
+                <h3>所持キャラ</h3>
                 <!-- Populated by JS -->
             </div>
             <div id="active-list" class="char-list">
-                <h3>Active Party</h3>
+                <h3>現在のパーティ</h3>
                 <!-- Populated by JS -->
             </div>
         </div>
-        <button id="party-back-btn" class="menu-btn">Back</button>
+        <button id="party-back-btn" class="menu-btn">戻る</button>
     </div>
 
     <!-- Gacha Screen -->
     <div id="gacha-screen" class="overlay" style="display: none;">
-        <h2>Gacha</h2>
+        <h2>ガチャ</h2>
         <div id="gacha-animation">?</div>
-        <button id="pull-btn" class="menu-btn">Pull (100 Coins)</button>
-        <button id="gacha-back-btn" class="menu-btn">Back</button>
+        <button id="pull-btn" class="menu-btn">引く (100コイン)</button>
+        <button id="gacha-back-btn" class="menu-btn">戻る</button>
         <div id="gacha-result"></div>
     </div>
 
