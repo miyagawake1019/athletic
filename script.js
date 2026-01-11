@@ -106,8 +106,10 @@ let canJump = false; // ジャンプ可能状態（接地後、一度キーを�
 // キー入力管理
 const keys = {
     ArrowUp: false,
+    ArrowDown: false,
     ArrowLeft: false,
-    ArrowRight: false
+    ArrowRight: false,
+    Space: false
 };
 
 window.addEventListener('keydown', (e) => {
@@ -157,29 +159,39 @@ function updatePlayer() {
 
     // 3. 移動・ジャンプ処理
     if (isGrounded) {
+        // 接地時の移動
+        const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
+
+        // 速度リセット（慣性をつけすぎない）
+        velocity.x = 0;
+        velocity.z = 0;
+
         if (keys.ArrowUp) {
-            // ジャンプ！
+            velocity.x += forward.x * MOVE_SPEED;
+            velocity.z += forward.z * MOVE_SPEED;
+        }
+        if (keys.ArrowDown) {
+            velocity.x -= forward.x * MOVE_SPEED;
+            velocity.z -= forward.z * MOVE_SPEED;
+        }
+
+        // ジャンプ
+        if (keys.Space) {
             velocity.y = JUMP_FORCE;
-
-            // 前方への速度を加算 (プレイヤーの向きに基づく)
-            const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
-            velocity.x = forward.x * MOVE_SPEED;
-            velocity.z = forward.z * MOVE_SPEED;
-
             isGrounded = false;
-        } else {
-            // 接地していてジャンプしていないときは減速（摩擦）
-            velocity.x *= 0.8;
-            velocity.z *= 0.8;
         }
     } else {
         // 空中
         // 重力適用
         velocity.y -= GRAVITY;
 
-        // 空中制御なし（あるいは微量な空気抵抗）
-        // ユーザー要件的には「飛び移る」のがメインなので、空中制御はない方がアスレチック感が出る
-        // ただし、速度を維持する
+        // 空中でも多少の移動制御を許すか、あるいは慣性のみにするか
+        // ユーザーの要望は「板から板に飛びついて」なので、空中制御があると簡単すぎるかもしれないが、
+        // 完全に制御不能だと難しい。
+        // ここでは「慣性は維持される」が「空中での加速はできない」設定にする。
+        // ただし、前回のコードでは空中制御なしだった。
+        // 今回の変更で、updatePlayerの冒頭で velocity.x/z をリセットするロジックに変えると、空中移動ができなくなる（速度0で落ちる）
+        // なので、空中では x, z は維持する必要がある。
     }
 
     // 位置更新
