@@ -1,284 +1,363 @@
 import * as THREE from 'three';
 
-// --- シーン、カメラ、レンダラーのセットアップ ---
+// --- シーン、カメラ、レンダラー ---
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB); // 空の色
-scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+scene.background = new THREE.Color(0x87CEEB);
+scene.fog = new THREE.Fog(0x87CEEB, 20, 150);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// --- 照明 ---
+// --- ライト ---
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
 
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 dirLight.position.set(50, 100, 50);
 dirLight.castShadow = true;
-dirLight.shadow.camera.left = -50;
-dirLight.shadow.camera.right = 50;
-dirLight.shadow.camera.top = 50;
-dirLight.shadow.camera.bottom = -50;
 dirLight.shadow.mapSize.width = 2048;
 dirLight.shadow.mapSize.height = 2048;
+dirLight.shadow.camera.left = -100;
+dirLight.shadow.camera.right = 100;
+dirLight.shadow.camera.top = 100;
+dirLight.shadow.camera.bottom = -100;
 scene.add(dirLight);
 
-// --- ステージ生成 ---
-const platforms = []; // 衝突判定用に板を格納する配列
+// --- ゲーム状態 ---
+const gameState = {
+    lap: 1,
+    maxLaps: 3,
+    checkpointIndex: 0,
+    startTime: Date.now(),
+    isFinished: false
+};
 
-function createPlatform(x, y, z, width, depth, color = 0x88cc88) {
-    const geometry = new THREE.BoxGeometry(width, 1, depth);
-    const material = new THREE.MeshStandardMaterial({ color: color });
-    const platform = new THREE.Mesh(geometry, material);
-    platform.position.set(x, y, z);
-    platform.receiveShadow = true;
-    scene.add(platform);
+const ui = {
+    lap: document.getElementById('lap-counter'),
+    time: document.getElementById('time-counter'),
+    message: document.getElementById('message')
+};
 
-    // 衝突判定のためにバウンディングボックス情報を保持しておく
-    // 実際の判定にはMeshのBoundingBoxを使うが、参照用配列に入れておく
-    platforms.push(platform);
-    return platform;
+// --- カート作成 ---
+function createKart() {
+    const kartGroup = new THREE.Group();
+
+    // ボディ
+    const bodyGeo = new THREE.BoxGeometry(1, 0.5, 2);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 0.5;
+    body.castShadow = true;
+    kartGroup.add(body);
+
+    // ウィング（飾り）
+    const wingGeo = new THREE.BoxGeometry(1.2, 0.1, 0.5);
+    const wingMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const wing = new THREE.Mesh(wingGeo, wingMat);
+    wing.position.set(0, 0.8, -0.8);
+    wing.castShadow = true;
+    kartGroup.add(wing);
+
+    // タイヤ
+    const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+    const positions = [
+        { x: 0.6, y: 0.3, z: 0.8 },
+        { x: -0.6, y: 0.3, z: 0.8 },
+        { x: 0.6, y: 0.3, z: -0.8 },
+        { x: -0.6, y: 0.3, z: -0.8 },
+    ];
+
+    positions.forEach(pos => {
+        const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(pos.x, pos.y, pos.z);
+        wheel.castShadow = true;
+        kartGroup.add(wheel);
+    });
+
+    return kartGroup;
 }
 
-// ゴールマーカー
-function createGoal(x, y, z) {
-    const platform = createPlatform(x, y, z, 5, 5, 0xffd700); // 金色
+const kart = createKart();
+scene.add(kart);
 
-    const poleGeometry = new THREE.CylinderGeometry(0.1, 0.1, 5, 8);
-    const poleMaterial = new THREE.MeshStandardMaterial({ color: 0xc0c0c0 });
-    const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-    pole.position.set(0, 2.5, 0);
-    pole.castShadow = true;
-    platform.add(pole);
+// カートの物理パラメータ
+const physics = {
+    speed: 0,
+    maxSpeed: 0.8,
+    acceleration: 0.01,
+    deceleration: 0.02,
+    friction: 0.005,
+    turnSpeed: 0.04,
+    angle: 0
+};
 
-    const flagGeometry = new THREE.BoxGeometry(2, 1.5, 0.1);
-    const flagMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-    const flag = new THREE.Mesh(flagGeometry, flagMaterial);
-    flag.position.set(1, 4, 0);
-    flag.castShadow = true;
-    platform.add(flag);
+// --- コース作成 ---
+const walls = [];
+const checkpoints = [];
 
-    platform.userData.isGoal = true;
+function createWall(x, y, z, w, h, d, color = 0x888888) {
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const mat = new THREE.MeshStandardMaterial({ color: color });
+    const wall = new THREE.Mesh(geo, mat);
+    wall.position.set(x, y, z);
+    wall.castShadow = true;
+    wall.receiveShadow = true;
+    scene.add(wall);
+    walls.push(wall); // 衝突判定用
 }
 
-function initLevel() {
-    // スタート地点
-    createPlatform(0, 0, 0, 6, 6, 0x555555);
+function createCheckpoint(x, z, w, d, index) {
+    // 可視化用（半透明）
+    const geo = new THREE.BoxGeometry(w, 5, d);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, opacity: 0.2, transparent: true });
+    const cp = new THREE.Mesh(geo, mat);
+    cp.position.set(x, 2.5, z);
+    cp.userData = { isCheckpoint: true, index: index };
+    // scene.add(cp); // デバッグ用に見たい場合はコメントアウトを外す
 
-    // 道中
-    createPlatform(0, 0, -8, 4, 4);
-    createPlatform(0, 1, -16, 3, 3);
-    createPlatform(4, 2, -22, 3, 3);
-    createPlatform(8, 3, -28, 3, 3);
-    createPlatform(4, 4, -34, 3, 3);
-    createPlatform(0, 5, -40, 3, 3);
-    createPlatform(-5, 6, -46, 3, 3);
-    createPlatform(-5, 7, -54, 3, 6);
-
-    // ゴール
-    createGoal(0, 8, -65);
+    // 衝突判定用にオブジェクトとして保持（シーンに追加しなくてもRaycaster用配列に入れれば判定可能だが、今回はBox3判定など簡易的なものにするか、Raycasterを使うか）
+    // ここでは単純なBox3判定を行うために保持する
+    const box = new THREE.Box3().setFromObject(cp);
+    checkpoints.push({ box: box, index: index, mesh: cp });
 }
 
-initLevel();
+function initTrack() {
+    // 地面
+    const groundGeo = new THREE.PlaneGeometry(200, 200);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x228B22 }); // ForestGreen
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
 
-// --- プレイヤーと操作 ---
-const playerGeometry = new THREE.BoxGeometry(1, 1, 1);
-const playerMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-const player = new THREE.Mesh(playerGeometry, playerMaterial);
-player.position.set(0, 2, 0);
-player.castShadow = true;
-scene.add(player);
+    // 路面（グレーのリングっぽいものを作る代わりに、地面の上に平たいキューブを敷く）
+    // シンプルなオーバルコースを作る
+    // コース幅: 20
+    // 直線部分: 長さ 60
+    // カーブ部分: 半径 30
 
-// 物理パラメータ
-const GRAVITY = 0.015;
-const JUMP_FORCE = 0.4;
-const MOVE_SPEED = 0.15; // ジャンプ時の前進速度
-const ROTATION_SPEED = 0.05;
+    // 外壁
+    // 直線（左）
+    createWall(-40, 1, 0, 2, 2, 100);
+    // 直線（右）
+    createWall(40, 1, 0, 2, 2, 100);
+    // カーブ（手前）- 簡易的に壁を並べる
+    createWall(0, 1, 50, 82, 2, 2);
+    // カーブ（奥）
+    createWall(0, 1, -50, 82, 2, 2);
 
-let velocity = new THREE.Vector3();
-let isGrounded = false;
-let canJump = false; // ジャンプ可能状態（接地後、一度キーを離す必要があるなどの制御用、今回はシンプルに接地判定で）
+    // 内壁
+    // 直線（左）
+    createWall(-20, 1, 0, 2, 2, 60, 0x555555);
+    // 直線（右）
+    createWall(20, 1, 0, 2, 2, 60, 0x555555);
+    // カーブ（手前）
+    createWall(0, 1, 30, 42, 2, 2, 0x555555);
+    // カーブ（奥）
+    createWall(0, 1, -30, 42, 2, 2, 0x555555);
 
-// キー入力管理
-// 上矢印: 前進
-// 下矢印: 後退
-// スペース: ジャンプ
-// 右矢印: 右回転
-// 左矢印: 左回転
+    // チェックポイント設置 (順番に通る必要がある)
+    // 0: スタート地点 (右側の直線の真ん中あたり)
+    // カートは (30, 0, 0) あたりからスタートし、Zマイナス方向へ進む想定
+    createCheckpoint(30, 0, 18, 5, 0); // スタート/ゴールライン
+    createCheckpoint(30, -40, 18, 5, 1); // 第1コーナー手前
+    createCheckpoint(0, -40, 5, 18, 2); // 奥のカーブ
+    createCheckpoint(-30, -40, 18, 5, 3); // バックストレート入り口
+    createCheckpoint(-30, 40, 18, 5, 4); // バックストレート出口
+    createCheckpoint(0, 40, 5, 18, 5); // 手前のカーブ
+
+    // スタートラインの描画
+    const lineGeo = new THREE.PlaneGeometry(18, 2);
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const line = new THREE.Mesh(lineGeo, lineMat);
+    line.rotation.x = -Math.PI / 2;
+    line.position.set(30, 0.05, 0);
+    scene.add(line);
+}
+
+initTrack();
+
+// カートの初期位置
+function resetKart() {
+    kart.position.set(30, 0, 0);
+    physics.angle = Math.PI; // Zマイナス方向を向く
+    physics.speed = 0;
+
+    // 回転を適用
+    kart.rotation.set(0, physics.angle, 0);
+}
+
+resetKart();
+
+// --- 操作 ---
 const keys = {
     ArrowUp: false,
     ArrowDown: false,
     ArrowLeft: false,
-    ArrowRight: false,
-    Space: false
+    ArrowRight: false
 };
 
 window.addEventListener('keydown', (e) => {
-    if (keys.hasOwnProperty(e.code)) {
-        keys[e.code] = true;
-    }
+    if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
 });
 
 window.addEventListener('keyup', (e) => {
-    if (keys.hasOwnProperty(e.code)) {
-        keys[e.code] = false;
-    }
+    if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
 });
 
-// Raycaster設定
-const raycaster = new THREE.Raycaster();
-const downVector = new THREE.Vector3(0, -1, 0);
+// --- 更新処理 ---
+const clock = new THREE.Clock();
 
-function updatePlayer() {
-    // 1. 回転
-    if (keys.ArrowLeft) {
-        player.rotation.y += ROTATION_SPEED;
-    }
-    if (keys.ArrowRight) {
-        player.rotation.y -= ROTATION_SPEED;
-    }
+function updatePhysics() {
+    if (gameState.isFinished) return;
 
-    // 2. 接地判定 (Raycast)
-    // プレイヤーの中心から下方向にレイを飛ばす
-    raycaster.set(player.position, downVector);
-    // 交差判定はすべてのプラットフォームに対して行う
-    const intersects = raycaster.intersectObjects(platforms);
-
-    isGrounded = false;
-    // 距離判定 (プレイヤーの半分(0.5) + マージン)
-    if (intersects.length > 0 && intersects[0].distance < 0.51 && velocity.y <= 0) {
-        isGrounded = true;
-        // めり込み防止
-        player.position.y = intersects[0].point.y + 0.5;
-        velocity.y = 0;
-
-        // ゴール判定
-        if (intersects[0].object.userData.isGoal) {
-            checkWin();
-        }
-    }
-
-    // 3. 移動・ジャンプ処理
-    if (isGrounded) {
-        // 接地時の移動
-        const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
-
-        // 速度リセット（慣性をつけすぎない）
-        velocity.x = 0;
-        velocity.z = 0;
-
-        if (keys.ArrowUp) {
-            velocity.x += forward.x * MOVE_SPEED;
-            velocity.z += forward.z * MOVE_SPEED;
-        }
-        if (keys.ArrowDown) {
-            velocity.x -= forward.x * MOVE_SPEED;
-            velocity.z -= forward.z * MOVE_SPEED;
-        }
-
-        // ジャンプ
-        if (keys.Space) {
-            velocity.y = JUMP_FORCE;
-            isGrounded = false;
-        }
+    // アクセル・ブレーキ
+    if (keys.ArrowUp) {
+        physics.speed += physics.acceleration;
+    } else if (keys.ArrowDown) {
+        physics.speed -= physics.deceleration; // ブレーキまたはバック
     } else {
-        // 空中
-        // 重力適用
-        velocity.y -= GRAVITY;
-
-        // 空中でも多少の移動制御を許すか、あるいは慣性のみにするか
-        // ユーザーの要望は「板から板に飛びついて」なので、空中制御があると簡単すぎるかもしれないが、
-        // 完全に制御不能だと難しい。
-        // ここでは「慣性は維持される」が「空中での加速はできない」設定にする。
-        // ただし、前回のコードでは空中制御なしだった。
-        // 今回の変更で、updatePlayerの冒頭で velocity.x/z をリセットするロジックに変えると、空中移動ができなくなる（速度0で落ちる）
-        // なので、空中では x, z は維持する必要がある。
+        // 自然減速
+        if (physics.speed > 0) {
+            physics.speed -= physics.friction;
+            if (physics.speed < 0) physics.speed = 0;
+        } else if (physics.speed < 0) {
+            physics.speed += physics.friction;
+            if (physics.speed > 0) physics.speed = 0;
+        }
     }
 
-    // 位置更新
-    player.position.add(velocity);
+    // 最高速度制限
+    if (physics.speed > physics.maxSpeed) physics.speed = physics.maxSpeed;
+    if (physics.speed < -physics.maxSpeed / 2) physics.speed = -physics.maxSpeed / 2; // バックは遅く
 
-    // 4. 落下判定 (リセット)
-    if (player.position.y < -10) {
-        resetGame();
+    // ハンドリング (速度が出ているときのみ曲がれる)
+    if (Math.abs(physics.speed) > 0.01) {
+        const turn = keys.ArrowLeft ? 1 : (keys.ArrowRight ? -1 : 0);
+        // バックのときはハンドル操作が逆になるのがリアルだが、操作性重視でそのままにするか、逆にするか。
+        // マリオカート等はバック時も見たままの方向に曲がる（車としては逆ハンドル）
+        // ここでは単純に前進後退に関わらず回転させる
+        physics.angle += turn * physics.turnSpeed * (physics.speed > 0 ? 1 : -1);
+    }
+
+    // 移動計算
+    const velocityX = Math.sin(physics.angle) * physics.speed;
+    const velocityZ = Math.cos(physics.angle) * physics.speed;
+
+    // 壁衝突判定 (簡易的: 次の位置が壁の中なら進まない)
+    const nextX = kart.position.x + velocityX;
+    const nextZ = kart.position.z + velocityZ;
+    const kartBox = new THREE.Box3().setFromCenterAndSize(
+        new THREE.Vector3(nextX, 0.5, nextZ),
+        new THREE.Vector3(1, 1, 2)
+    );
+
+    let collision = false;
+    for (const wall of walls) {
+        const wallBox = new THREE.Box3().setFromObject(wall);
+        if (wallBox.intersectsBox(kartBox)) {
+            collision = true;
+            break;
+        }
+    }
+
+    if (collision) {
+        // 衝突したら速度をゼロにする（あるいは跳ね返る）
+        physics.speed *= -0.5; // 跳ね返り
+    } else {
+        kart.position.x = nextX;
+        kart.position.z = nextZ;
+    }
+
+    // 回転適用
+    kart.rotation.y = physics.angle;
+
+    // チェックポイント判定
+    const currentKartBox = new THREE.Box3().setFromObject(kart);
+    for (const cp of checkpoints) {
+        if (cp.box.intersectsBox(currentKartBox)) {
+            // 正しい順序で通っているか
+            const nextIndex = (gameState.checkpointIndex + 1) % checkpoints.length;
+
+            if (cp.index === nextIndex) {
+                gameState.checkpointIndex = nextIndex;
+                console.log("Checkpoint:", nextIndex);
+
+                // スタートライン(index 0)を通過したら周回カウント
+                if (nextIndex === 0) {
+                    gameState.lap++;
+                    if (gameState.lap > gameState.maxLaps) {
+                        finishGame();
+                    } else {
+                        updateUI();
+                    }
+                }
+            }
+        }
     }
 }
 
 function updateCamera() {
-    // プレイヤーの後ろ上方にカメラを配置
-    // 現在のプレイヤー位置を基準にするが、回転も考慮する
+    // カートの後ろにカメラを追従させる
+    // カートの向きに合わせてカメラ位置を計算
+    const relativeCameraOffset = new THREE.Vector3(0, 5, -10); // カートの後ろ(Zマイナス)ではなく、Zプラスが後ろ（モデルによる）
+    // モデルはZ軸方向が長さ。初期向きはZマイナス。
+    // Math.sin(angle)で計算してるので、angle=0はZ+方向、angle=PIはZ-方向。
+    // angle=PIのとき、カートはZ-に進む。カメラはZ+側にいてほしい。
 
-    // 理想的なカメラ位置（プレイヤーのローカル座標系での後ろ上）
-    const idealOffset = new THREE.Vector3(0, 5, 10);
+    // シンプルに計算:
+    // カメラの理想位置 = カート位置 - (進行方向ベクトル * 距離) + (上方向 * 高さ)
+    const dist = 10;
+    const height = 5;
 
-    // プレイヤーの回転に合わせてオフセットを回転させる
-    // ただし、カメラが激しく回転すると酔うので、プレイヤーのY回転に対して少し遅れて追従するか、
-    // あるいは単純にプレイヤーの後ろから常に映すか。
-    // 今回はシンプルに「プレイヤーの背後」に固定してスムーズに動かす
+    const camX = kart.position.x - Math.sin(physics.angle) * dist;
+    const camZ = kart.position.z - Math.cos(physics.angle) * dist;
 
-    // プレイヤーの背後位置を計算
-    const offset = idealOffset.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
-    const targetPosition = player.position.clone().add(offset);
-
-    // カメラ位置を滑らかに更新 (Lerp)
-    camera.position.lerp(targetPosition, 0.1);
-
-    // カメラは常にプレイヤーを見る
-    camera.lookAt(player.position);
+    // 少し遅延させると滑らかになるが、酔い防止のため直接セットしてLookAt
+    camera.position.set(camX, height, camZ);
+    camera.lookAt(kart.position);
 }
 
-function resetGame() {
-    player.position.set(0, 2, 0);
-    player.rotation.set(0, 0, 0);
-    velocity.set(0, 0, 0);
-    // メッセージがあれば消す
-    const msg = document.getElementById('message');
-    if(msg) msg.remove();
+function updateUI() {
+    ui.lap.innerText = `${gameState.lap} / ${gameState.maxLaps}`;
 }
 
-function checkWin() {
-    // 既にメッセージが出ていれば何もしない
-    if (document.getElementById('message')) return;
-
-    const msg = document.createElement('div');
-    msg.id = 'message';
-    msg.style.position = 'absolute';
-    msg.style.top = '50%';
-    msg.style.left = '50%';
-    msg.style.transform = 'translate(-50%, -50%)';
-    msg.style.fontSize = '50px';
-    msg.style.color = 'gold';
-    msg.style.textShadow = '2px 2px 4px black';
-    msg.style.fontFamily = 'sans-serif';
-    msg.innerText = 'GOAL!!';
-    document.body.appendChild(msg);
-
-    // 数秒後にリセット
-    setTimeout(() => {
-        resetGame();
-    }, 3000);
+function finishGame() {
+    gameState.isFinished = true;
+    ui.message.style.display = 'block';
 }
 
+function updateTime() {
+    if (!gameState.isFinished) {
+        const now = Date.now();
+        const diff = (now - gameState.startTime) / 1000;
+        ui.time.innerText = diff.toFixed(2);
+    }
+}
 
-// --- ウィンドウリサイズ対応 ---
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-// --- アニメーションループ ---
+// --- アニメーション ---
 function animate() {
     requestAnimationFrame(animate);
 
-    updatePlayer();
+    updatePhysics();
     updateCamera();
+    updateTime();
 
     renderer.render(scene, camera);
 }
 
 animate();
+
+// ウィンドウリサイズ
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
