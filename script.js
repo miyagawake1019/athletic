@@ -104,6 +104,11 @@ let isGrounded = false;
 let canJump = false; // ジャンプ可能状態（接地後、一度キーを離す必要があるなどの制御用、今回はシンプルに接地判定で）
 
 // キー入力管理
+// 上矢印: 前進
+// 下矢印: 後退
+// スペース: ジャンプ
+// 右矢印: 右回転
+// 左矢印: 左回転
 const keys = {
     ArrowUp: false,
     ArrowDown: false,
