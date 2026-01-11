@@ -3,27 +3,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Athletic Game</title>
+    <title>3D Athletic Game - RPG Edition</title>
     <link rel="stylesheet" href="style.css">
-    <style>
-        body { margin: 0; overflow: hidden; }
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            color: white;
-            font-family: sans-serif;
-            pointer-events: none;
-            text-shadow: 1px 1px 2px black;
-        }
-    </style>
 </head>
 <body>
-    <div id="info">
-        上矢印: ジャンプして進む | 左矢印: 左回転 | 右矢印: 右回転<br>
-        ゴールを目指せ！
+    <!-- Game HUD -->
+    <div id="game-ui" style="display: none;">
+        <div id="info">
+            上矢印: ジャンプして進む | 左矢印: 左回転 | 右矢印: 右回転<br>
+            ゴールを目指せ！
+        </div>
+        <div id="stats">
+            Level: <span id="level-display">1</span> |
+            Squad: <span id="squad-display">0/7</span>
+        </div>
+        <button id="back-to-menu-btn" class="corner-btn">Menu</button>
     </div>
+
+    <!-- Main Menu -->
+    <div id="main-menu">
+        <h1>Athletic Quest</h1>
+        <button id="start-btn" class="menu-btn">Start Game</button>
+        <button id="party-btn" class="menu-btn">Party Setup</button>
+        <button id="gacha-btn" class="menu-btn">Gacha (Get Characters)</button>
+    </div>
+
+    <!-- Party Selection Screen -->
+    <div id="party-screen" class="overlay" style="display: none;">
+        <h2>Party Setup (Max 7)</h2>
+        <div class="party-container">
+            <div id="owned-list" class="char-list">
+                <h3>Owned Characters</h3>
+                <!-- Populated by JS -->
+            </div>
+            <div id="active-list" class="char-list">
+                <h3>Active Party</h3>
+                <!-- Populated by JS -->
+            </div>
+        </div>
+        <button id="party-back-btn" class="menu-btn">Back</button>
+    </div>
+
+    <!-- Gacha Screen -->
+    <div id="gacha-screen" class="overlay" style="display: none;">
+        <h2>Gacha</h2>
+        <div id="gacha-animation">?</div>
+        <button id="pull-btn" class="menu-btn">Pull (100 Coins)</button>
+        <button id="gacha-back-btn" class="menu-btn">Back</button>
+        <div id="gacha-result"></div>
+    </div>
+
     <!-- Three.js CDN -->
     <script type="importmap">
         {
